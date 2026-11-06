@@ -416,7 +416,7 @@ def send_mail(recipient, pdf_path, submission, form_title):
     body = fill(env(
         "MAIL_BODY",
         "Hello,\n\nThank you for your submission to \"{form}\". "
-        "A copy of the form is attached as a PDF.\n",
+        "Please see a copy of your responses attached. For any concerns, please contact MEL@australiaassists.org.\n",
     ))
     signature = env("MAIL_SIGNATURE_HTML")
     if signature:
