@@ -116,7 +116,8 @@ def find_recipient(submission):
 # ---------------------------------------------------------------- PDF content
 
 def item_name(item):
-    return item.get("name") or item.get("$autoname") or ""
+    # Choices built in the Kobo form builder may only have "$autovalue".
+    return item.get("name") or item.get("$autoname") or item.get("$autovalue") or ""
 
 
 def plain_text(label):
@@ -139,10 +140,11 @@ class Form:
         self.title = asset.get("name") or "Form submission"
         self.lang = self._language_index(content.get("translations") or [None])
         self.tree = self._build_tree(content.get("survey", []))
-        self.choices = {
-            (c.get("list_name"), item_name(c)): self.label(c)
-            for c in content.get("choices", [])
-        }
+        self.choices = {}
+        self.choice_lists = {}  # list name -> choices in form order (matrix rows)
+        for c in content.get("choices", []):
+            self.choices[(c.get("list_name"), item_name(c))] = self.label(c)
+            self.choice_lists.setdefault(c.get("list_name"), []).append(c)
 
     @staticmethod
     def _language_index(translations):
@@ -159,23 +161,33 @@ class Form:
         stack = [root]
         for row in rows:
             kind = row.get("type", "").replace(" ", "_")
-            if kind in ("begin_group", "begin_repeat"):
-                node = {"row": row, "repeat": kind == "begin_repeat", "children": []}
+            if kind in ("begin_group", "begin_repeat", "begin_kobomatrix"):
+                node = {
+                    "row": row,
+                    "repeat": kind == "begin_repeat",
+                    "matrix": kind == "begin_kobomatrix",
+                    "children": [],
+                }
                 stack[-1]["children"].append(node)
                 stack.append(node)
-            elif kind in ("end_group", "end_repeat"):
+            elif kind in ("end_group", "end_repeat", "end_kobomatrix"):
                 if len(stack) > 1:
                     stack.pop()
             else:
                 stack[-1]["children"].append({"row": row})
         return root["children"]
 
-    def label(self, item):
+    def text(self, item):
+        """The item's label as plain text, or "" if it has none."""
         label = item.get("label")
         if isinstance(label, list):
             picked = label[self.lang] if self.lang < len(label) else None
             label = picked or next((l for l in label if l), None)
-        return plain_text(label or "") or item_name(item)
+        return plain_text(label or "")
+
+    def label(self, item):
+        """The label, falling back to the question name so an answer is never unlabelled."""
+        return self.text(item) or item_name(item)
 
 
 class Renderer:
@@ -198,12 +210,16 @@ class Renderer:
             f"Submission #{self.submission['_id']}</div>{body}</body></html>"
         )
 
-    def nodes(self, nodes, data, prefix):
+    def nodes(self, nodes, data, prefix, matrix_row=None):
         out = []
         for node in nodes:
             row = node["row"]
             path = prefix + item_name(row)
+            if node.get("matrix"):
+                out.append(self.matrix(node, data, prefix))
+                continue
             if "children" in node:
+                heading, row_name = self.group_heading(node)
                 if node["repeat"]:
                     items = data.get(path) or []
                     inner = "".join(
@@ -212,20 +228,78 @@ class Renderer:
                         for i, item in enumerate(items, 1)
                     )
                 else:
-                    inner = self.nodes(node["children"], data, path + "/")
+                    inner = self.nodes(node["children"], data, path + "/", row_name)
                 if inner:  # skip groups with no answered questions
-                    out.append(f"<section><h2>{html.escape(self.form.label(row))}</h2>{inner}</section>")
+                    out.append(self.section(heading, inner))
                 continue
 
             kind = row.get("type", "")
             value = data.get(path)
             if kind in SKIP_TYPES or value in (None, ""):
                 continue
-            out.append(
-                f"<div class='q'><div class='label'>{html.escape(self.form.label(row))}</div>"
-                f"<div class='answer'>{self.answer(row, kind, value)}</div></div>"
-            )
+            label = self.form.label(row)
+            if matrix_row:
+                # Matrix cells are labelled "<row>-<column>"; the row is already the heading.
+                label = label.removeprefix(matrix_row + "-")
+            out.append(self.question(label, row, kind, value))
         return "".join(out)
+
+    def group_heading(self, node):
+        """Return (heading, matrix row name) for a group.
+
+        A Kobo Question Matrix becomes one unlabelled group per row (named
+        "<matrix>_<row>") whose row label sits in a "<group>_note" note. Use that
+        note as the heading instead of printing the internal group name.
+        """
+        row = node["row"]
+        heading = self.form.text(row)
+        if heading:
+            return heading, None
+        name = item_name(row)
+        for child in node["children"]:
+            child_row = child["row"]
+            if "children" not in child and item_name(child_row) == name + "_note":
+                note = self.form.text(child_row)
+                # The cells' labels start with the row's choice name: "<row>-<column>".
+                for cell in node["children"]:
+                    cell_label = self.form.text(cell["row"])
+                    row_name, sep, _ = cell_label.partition("-")
+                    if sep and name.endswith("_" + row_name):
+                        return note, row_name
+                return note, None
+        return "", None  # no label at all: show the answers without a heading
+
+    def matrix(self, node, data, prefix):
+        """A Question Matrix as stored in the Kobo form: one column question per
+        child, one row per choice of its "kobo--matrix_list". Kobo saves each
+        cell as "<matrix>_<row>/<matrix>_<row>_<column>"."""
+        row = node["row"]
+        matrix_name = item_name(row)
+        rows = []
+        for choice in self.form.choice_lists.get(row.get("kobo--matrix_list"), []):
+            base = f"{matrix_name}_{item_name(choice)}"
+            cells = []
+            for col in node["children"]:
+                col_row = col["row"]
+                kind = col_row.get("type", "")
+                value = data.get(f"{prefix}{base}/{base}_{item_name(col_row)}")
+                if "children" in col or kind in SKIP_TYPES or value in (None, ""):
+                    continue
+                cells.append(self.question(self.form.label(col_row), col_row, kind, value))
+            if cells:
+                rows.append(self.section(self.form.label(choice), "".join(cells)))
+        return self.section(self.form.text(row), "".join(rows)) if rows else ""
+
+    @staticmethod
+    def section(heading, inner):
+        title = f"<h2>{html.escape(heading)}</h2>" if heading else ""
+        return f"<section>{title}{inner}</section>"
+
+    def question(self, label, row, kind, value):
+        return (
+            f"<div class='q'><div class='label'>{html.escape(label)}</div>"
+            f"<div class='answer'>{self.answer(row, kind, value)}</div></div>"
+        )
 
     def answer(self, row, kind, value):
         list_name = row.get("select_from_list_name")
