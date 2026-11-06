@@ -47,7 +47,22 @@ Kobo submission ──REST Service──▶ api.github.com/repos/<owner>/<repo>/
 | `MAIL_FROM_NAME` | `Survey Team` | Optional sender name shown in the inbox; the address stays `MAIL_FROM` / `SMTP_USERNAME` |
 | `MAIL_SUBJECT` | `Your submission: {form}` | Optional; `{form}` is replaced by the form's name |
 | `MAIL_BODY` | | Optional plain-text body; `{form}` works here too |
+| `MAIL_SIGNATURE_HTML` | contents of `assets/signature.html` | Optional HTML signature added below the body (see [Email signature](#email-signature)) |
 | `MAIL_BCC` | `archive@example.org` | Optional, get a copy of every email |
+
+### Email signature
+
+Gmail adds your signature only to mail written in Gmail, not to mail sent over
+SMTP, so set it here instead:
+
+1. Edit [`assets/signature.html`](assets/signature.html) (or write your own HTML).
+2. Copy the whole file into the `MAIL_SIGNATURE_HTML` variable.
+
+The email is then sent as HTML (with a plain-text copy for mail apps that need
+one). Images whose `src` is a file in this repository, e.g.
+`<img src="assets/australian-aid.png">`, are embedded in the email, so they show
+without the reader having to allow remote images. `https://` image links are
+left as they are. To change a logo, replace the file in `assets/` and push.
 
 ## 2. GitHub token for Kobo
 

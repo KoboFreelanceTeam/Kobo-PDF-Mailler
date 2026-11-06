@@ -9,13 +9,14 @@ are always fetched from the Kobo API.
 import base64
 import html
 import json
+import mimetypes
 import os
 import re
 import smtplib
 import sys
 from datetime import datetime
 from email.message import EmailMessage
-from email.utils import formataddr, parseaddr
+from email.utils import formataddr, make_msgid, parseaddr
 from pathlib import Path
 
 import requests
@@ -349,6 +350,56 @@ def render_pdf(page_html, out_path):
 
 # ---------------------------------------------------------------- email
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+IMG_SRC_RE = re.compile(r"""(<img\b[^>]*?\bsrc\s*=\s*)(["'])(.*?)\2""", re.I | re.S)
+
+
+def html_to_text(markup):
+    """Rough plain-text version of the signature for mail apps that show no HTML."""
+    text = re.sub(r"(?is)<(style|script)\b.*?</\1>", "", markup)
+    text = re.sub(r"(?is)<img\b[^>]*>", "", text)
+    text = re.sub(r"\s+", " ", text)  # line breaks in the HTML source mean nothing
+    text = re.sub(r"(?i)<br\s*/?>|</(p|div|tr|h\d|li|table)>", "\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    lines = [re.sub(r"\s+", " ", line).strip() for line in html.unescape(text).splitlines()]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def add_signed_body(msg, body, signature_html):
+    """Plain-text + HTML body with the signature. Images in the signature that
+    point to a file in this repository (e.g. src="assets/logo.png") are attached
+    inline, so they show without the reader having to allow remote images."""
+    images = []  # (cid, path)
+
+    def embed(match):
+        src = match.group(3).strip()
+        if re.match(r"^(https?:|cid:|data:)", src, re.I):
+            return match.group(0)
+        path = (REPO_ROOT / src).resolve()
+        if REPO_ROOT not in path.parents or not path.is_file():
+            sys.exit(f"MAIL_SIGNATURE_HTML: image {src!r} not found in the repository")
+        cid = make_msgid(domain="signature")
+        images.append((cid, path))
+        return f"{match.group(1)}{match.group(2)}cid:{cid[1:-1]}{match.group(2)}"
+
+    signature_html = IMG_SRC_RE.sub(embed, signature_html)
+    body_html = html.escape(body).replace("\n", "<br>\n")
+
+    msg.set_content(f"{body.rstrip()}\n\n-- \n{html_to_text(signature_html)}\n")
+    msg.add_alternative(
+        "<!doctype html><html><body>"
+        f"<div style='font-family:Arial,Helvetica,sans-serif;font-size:11pt'>{body_html}</div>"
+        f"<br>{signature_html}</body></html>",
+        subtype="html",
+    )
+    html_part = msg.get_payload()[1]
+    for cid, path in images:
+        mime = mimetypes.guess_type(path.name)[0] or "image/png"
+        maintype, subtype = mime.split("/", 1)
+        html_part.add_related(path.read_bytes(), maintype=maintype, subtype=subtype,
+                              cid=cid, filename=path.name, disposition="inline")
+
+
 def send_mail(recipient, pdf_path, submission, form_title):
     def fill(text):
         return text.replace("{form}", form_title)
@@ -362,11 +413,16 @@ def send_mail(recipient, pdf_path, submission, form_title):
     if env("MAIL_BCC"):
         msg["Bcc"] = env("MAIL_BCC")
     msg["Subject"] = fill(env("MAIL_SUBJECT", "Your submission: {form}"))
-    msg.set_content(fill(env(
+    body = fill(env(
         "MAIL_BODY",
         "Hello,\n\nThank you for your submission to \"{form}\". "
         "A copy of the form is attached as a PDF.\n",
-    )))
+    ))
+    signature = env("MAIL_SIGNATURE_HTML")
+    if signature:
+        add_signed_body(msg, body, fill(signature))
+    else:
+        msg.set_content(body)
     msg.add_attachment(
         pdf_path.read_bytes(),
         maintype="application",
