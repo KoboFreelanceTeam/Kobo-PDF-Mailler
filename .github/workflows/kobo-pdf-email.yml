@@ -55,3 +55,8 @@ jobs:
           KOBO_TOKEN: ${{ secrets.KOBO_TOKEN }}
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          # Outlook.com: OAuth2 instead of SMTP_PASSWORD (see README).
+          OUTLOOK_CLIENT_ID: ${{ vars.OUTLOOK_CLIENT_ID }}
+          OUTLOOK_TENANT: ${{ vars.OUTLOOK_TENANT }}
+          OUTLOOK_REFRESH_TOKEN: ${{ secrets.OUTLOOK_REFRESH_TOKEN }}
+          GH_SECRETS_TOKEN: ${{ secrets.GH_SECRETS_TOKEN }}

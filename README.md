@@ -30,7 +30,9 @@ Kobo submission ──REST Service──▶ api.github.com/repos/<owner>/<repo>/
 |---|---|
 | `KOBO_TOKEN` | Kobo API token (Kobo → Account settings → Security → API key) |
 | `SMTP_USERNAME` | SMTP login, e.g. your Gmail address |
-| `SMTP_PASSWORD` | SMTP password; for Gmail an [App Password](https://myaccount.google.com/apppasswords) |
+| `SMTP_PASSWORD` | SMTP password; for Gmail an [App Password](https://myaccount.google.com/apppasswords). Not used with Outlook (see [Sending from Outlook.com](#sending-from-outlookcom)) |
+| `OUTLOOK_REFRESH_TOKEN` | Outlook only: from `scripts/outlook_oauth_setup.py` |
+| `GH_SECRETS_TOKEN` | Outlook only, optional: lets the workflow renew `OUTLOOK_REFRESH_TOKEN` itself |
 
 **Settings → Secrets and variables → Actions → Variables**
 
@@ -43,6 +45,8 @@ Kobo submission ──REST Service──▶ api.github.com/repos/<owner>/<repo>/
 | `FORM_LANGUAGE` | `English` | Optional, for multi-language forms: which label language to print |
 | `SMTP_HOST` | `smtp.gmail.com` | |
 | `SMTP_PORT` | `465` | `465` = SSL, anything else = STARTTLS (e.g. `587`) |
+| `OUTLOOK_CLIENT_ID` | `1a2b3c4d-...` | Outlook only: the Azure app's Application (client) ID |
+| `OUTLOOK_TENANT` | `consumers` | Outlook only, optional: `consumers` (default) for personal accounts, or a work tenant id |
 | `MAIL_FROM` | `Survey Team <you@gmail.com>` | Optional, defaults to `SMTP_USERNAME` |
 | `MAIL_FROM_NAME` | `Survey Team` | Optional sender name shown in the inbox; the address stays `MAIL_FROM` / `SMTP_USERNAME` |
 | `MAIL_SUBJECT` | `Your submission: {form}` | Optional; `{form}` is replaced by the form's name |
@@ -63,6 +67,37 @@ one). Images whose `src` is a file in this repository, e.g.
 `<img src="assets/australian-aid.png">`, are embedded in the email, so they show
 without the reader having to allow remote images. `https://` image links are
 left as they are. To change a logo, replace the file in `assets/` and push.
+
+### Sending from Outlook.com
+
+Personal Outlook.com / Hotmail accounts no longer accept a password over SMTP
+(error `5.7.139 ... SmtpClientAuthentication is disabled`). They need OAuth2,
+which the script uses when `OUTLOOK_CLIENT_ID` and `OUTLOOK_REFRESH_TOKEN` are set.
+
+1. **Register an app** at [portal.azure.com](https://portal.azure.com) →
+   *App registrations* → *New registration*:
+   - Supported account types: *Personal Microsoft accounts only*
+   - No redirect URI.
+   - After creating it: *Authentication* → *Allow public client flows* → **Yes** → Save.
+   - Copy the *Application (client) ID* into the `OUTLOOK_CLIENT_ID` variable.
+2. **Sign in once** on your computer (Python with `requests` installed, and the
+   [GitHub CLI](https://cli.github.com) logged in to this repo):
+
+   ```
+   python scripts/outlook_oauth_setup.py <CLIENT_ID> | gh secret set OUTLOOK_REFRESH_TOKEN
+   ```
+
+   Open the link it shows, enter the code and sign in with the Outlook account
+   that should send the emails.
+3. Set `SMTP_USERNAME` to that Outlook address. `SMTP_HOST` / `SMTP_PORT` default
+   to `smtp-mail.outlook.com` / `587`; `SMTP_PASSWORD` is not needed.
+4. **Keep it alive (recommended).** Each refresh token lasts 90 days, and
+   Microsoft gives a new one on every use. Create a fine-grained GitHub token
+   for this repo with **Secrets → Read and write** and save it as the
+   `GH_SECRETS_TOKEN` secret; the workflow then stores each new refresh token
+   itself. Without it, repeat step 2 within 90 days.
+
+If the run log says *Outlook sign-in failed*, repeat step 2.
 
 ## 2. GitHub token for Kobo
 

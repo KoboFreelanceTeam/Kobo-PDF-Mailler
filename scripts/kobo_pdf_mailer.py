@@ -430,8 +430,9 @@ def send_mail(recipient, pdf_path, submission, form_title):
         filename=f"submission-{submission['_id']}.pdf",
     )
 
-    host = env("SMTP_HOST")
-    port = int(env("SMTP_PORT", "465"))
+    oauth = bool(env("OUTLOOK_CLIENT_ID") and env("OUTLOOK_REFRESH_TOKEN"))
+    host = env("SMTP_HOST", "smtp-mail.outlook.com" if oauth else None)
+    port = int(env("SMTP_PORT", "587" if oauth else "465"))
     user, password = env("SMTP_USERNAME"), env("SMTP_PASSWORD")
     if port == 465:
         server = smtplib.SMTP_SSL(host, port, timeout=60)
@@ -439,9 +440,78 @@ def send_mail(recipient, pdf_path, submission, form_title):
         server = smtplib.SMTP(host, port, timeout=60)
         server.starttls()
     with server:
-        if user:
+        if oauth:
+            # Outlook.com no longer accepts passwords over SMTP, only OAuth2.
+            xoauth2_login(server, user, outlook_access_token())
+        elif user:
             server.login(user, password)
         server.send_message(msg)
+
+
+# ---------------------------------------------------------------- Outlook OAuth2
+
+OUTLOOK_SCOPE = "https://outlook.office.com/SMTP.Send offline_access"
+
+
+def outlook_token_url():
+    # "consumers" = personal Outlook.com/Hotmail accounts; a work tenant id also works.
+    return f"https://login.microsoftonline.com/{env('OUTLOOK_TENANT', 'consumers')}/oauth2/v2.0/token"
+
+
+def outlook_access_token():
+    """Swap the stored refresh token for a short-lived access token."""
+    r = requests.post(outlook_token_url(), timeout=60, data={
+        "client_id": env("OUTLOOK_CLIENT_ID"),
+        "grant_type": "refresh_token",
+        "refresh_token": env("OUTLOOK_REFRESH_TOKEN"),
+        "scope": OUTLOOK_SCOPE,
+    })
+    if r.status_code != 200:
+        error = r.json().get("error_description", r.text) if r.headers.get(
+            "content-type", "").startswith("application/json") else r.text
+        sys.exit(
+            "Outlook sign-in failed; run scripts/outlook_oauth_setup.py again to get a "
+            f"new OUTLOOK_REFRESH_TOKEN.\n{error.splitlines()[0] if error else r.status_code}"
+        )
+    tokens = r.json()
+    new_refresh = tokens.get("refresh_token")
+    if new_refresh and new_refresh != env("OUTLOOK_REFRESH_TOKEN"):
+        print(f"::add-mask::{new_refresh}")  # never show it in the run log
+        save_refresh_token(new_refresh)
+    return tokens["access_token"]
+
+
+def save_refresh_token(token):
+    """Microsoft hands out a new refresh token on every use, and each one only
+    lasts 90 days. With GH_SECRETS_TOKEN set, store the new one in the
+    OUTLOOK_REFRESH_TOKEN secret so the sign-in never runs out."""
+    gh_token, repo = env("GH_SECRETS_TOKEN"), env("GITHUB_REPOSITORY")
+    if not gh_token or not repo:
+        return
+    try:
+        from nacl import encoding, public
+
+        api = f"https://api.github.com/repos/{repo}/actions/secrets"
+        headers = {"Authorization": f"Bearer {gh_token}",
+                   "Accept": "application/vnd.github+json"}
+        r = requests.get(f"{api}/public-key", headers=headers, timeout=30)
+        r.raise_for_status()
+        key = r.json()
+        box = public.SealedBox(public.PublicKey(key["key"].encode(), encoding.Base64Encoder()))
+        sealed = base64.b64encode(box.encrypt(token.encode())).decode()
+        r = requests.put(f"{api}/OUTLOOK_REFRESH_TOKEN", headers=headers, timeout=30,
+                         json={"encrypted_value": sealed, "key_id": key["key_id"]})
+        r.raise_for_status()
+        print("Saved the renewed Outlook refresh token.")
+    except Exception as exc:  # sending the email matters more than this
+        print(f"::warning::Could not save the renewed Outlook refresh token: {exc}")
+
+
+def xoauth2_login(server, user, access_token):
+    auth = f"user={user}\x01auth=Bearer {access_token}\x01\x01"
+    server.ehlo()
+    # smtplib base64-encodes the answer; on an error challenge, reply empty.
+    server.auth("XOAUTH2", lambda challenge=None: auth if challenge is None else "")
 
 
 def mask(address):
