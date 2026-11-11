@@ -53,7 +53,7 @@ Kobo submission ──REST Service──▶ api.github.com/repos/<owner>/<repo>/
 | `MAIL_BODY` | | Optional plain-text body; `{form}` works here too |
 | `MAIL_SIGNATURE_HTML` | contents of `assets/signature.html` | Optional HTML signature added below the body (see [Email signature](#email-signature)) |
 | `MAIL_BCC` | `archive@example.org` | Optional, get a copy of every email |
-| `MAIL_REPLY_TO` | `MEL@australiaassists.org` | Optional: where replies go when someone clicks Reply. Lets you send from a sending-only account (see [Sending-only Gmail account](#sending-only-gmail-account)) |
+| `MAIL_REPLY_TO` | `replies@example.org` | Optional: where replies go when someone clicks Reply. Lets you send from a sending-only account (see [Sending-only Gmail account](#sending-only-gmail-account)) |
 
 ### Email signature
 
@@ -75,7 +75,7 @@ Gmail App Passwords need 2-Step Verification on the account. If the person whose
 address should receive replies doesn't want that on their own account, send from
 a separate Gmail account that is only used by this workflow:
 
-1. Create a new Gmail account, e.g. `aa.mel.surveys@gmail.com`.
+1. Create a new Gmail account, e.g. `survey-mailer@gmail.com`.
 2. Turn on 2-Step Verification for **that** account
    ([myaccount.google.com/security](https://myaccount.google.com/security)).
 3. Create an App Password for it
@@ -83,9 +83,9 @@ a separate Gmail account that is only used by this workflow:
 4. Set the secrets `SMTP_USERNAME` = the new address, `SMTP_PASSWORD` = the App
    Password (16 letters, spaces don't matter), and the variables
    `SMTP_HOST` = `smtp.gmail.com`, `SMTP_PORT` = `465`.
-5. Set `MAIL_FROM_NAME` (e.g. `Australia Assists MEL Team`) so the inbox shows a
+5. Set `MAIL_FROM_NAME` (e.g. `Survey Team`) so the inbox shows a
    name instead of the address, and `MAIL_REPLY_TO` to the address that should
-   get replies (e.g. `MEL@australiaassists.org`).
+   get replies (e.g. `replies@example.org`).
 
 Recipients see the team name as sender; when they reply, the reply goes to
 `MAIL_REPLY_TO`, not to the sending account.
@@ -160,7 +160,7 @@ in the REST Service log, where failed calls can be retried.
 | Place | Who can see it | Protection |
 |---|---|---|
 | Emailed PDF | Only the address typed in the form (+ `MAIL_BCC`) | Recipient is always re-read from Kobo, never taken from the trigger |
-| Actions run logs | People with access to the GitHub repo | Logs contain only the submission id and a masked email (`os***@gmail.com`); no answers, no view link |
+| Actions run logs | People with access to the GitHub repo | Logs contain only the submission id and a masked email (`jo***@example.org`); no answers, no view link |
 | The PDF file | Nobody | Created on a throwaway GitHub runner, deleted when the job ends; not uploaded as an artifact |
 | `KOBO_TOKEN` | Nobody (masked secret) | But anyone with **write** access to the repo could change the workflow and use it, so give write access only to people allowed to see the data |
 | GitHub token in Kobo | Kobo project admins | They can already see all submissions. Someone holding it can only trigger an email of a submission to *its own* recipient |
