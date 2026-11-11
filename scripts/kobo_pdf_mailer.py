@@ -412,6 +412,9 @@ def send_mail(recipient, pdf_path, submission, form_title):
     msg["To"] = recipient
     if env("MAIL_BCC"):
         msg["Bcc"] = env("MAIL_BCC")
+    if env("MAIL_REPLY_TO"):
+        # Send from one account (e.g. a sending-only Gmail), receive replies at another.
+        msg["Reply-To"] = env("MAIL_REPLY_TO")
     msg["Subject"] = fill(env("MAIL_SUBJECT", "Your submission: {form}"))
     body = fill(env(
         "MAIL_BODY",

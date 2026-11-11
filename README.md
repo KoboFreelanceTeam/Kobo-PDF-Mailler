@@ -53,6 +53,7 @@ Kobo submission ──REST Service──▶ api.github.com/repos/<owner>/<repo>/
 | `MAIL_BODY` | | Optional plain-text body; `{form}` works here too |
 | `MAIL_SIGNATURE_HTML` | contents of `assets/signature.html` | Optional HTML signature added below the body (see [Email signature](#email-signature)) |
 | `MAIL_BCC` | `archive@example.org` | Optional, get a copy of every email |
+| `MAIL_REPLY_TO` | `MEL@australiaassists.org` | Optional: where replies go when someone clicks Reply. Lets you send from a sending-only account (see [Sending-only Gmail account](#sending-only-gmail-account)) |
 
 ### Email signature
 
@@ -67,6 +68,27 @@ one). Images whose `src` is a file in this repository, e.g.
 `<img src="assets/australian-aid.png">`, are embedded in the email, so they show
 without the reader having to allow remote images. `https://` image links are
 left as they are. To change a logo, replace the file in `assets/` and push.
+
+### Sending-only Gmail account
+
+Gmail App Passwords need 2-Step Verification on the account. If the person whose
+address should receive replies doesn't want that on their own account, send from
+a separate Gmail account that is only used by this workflow:
+
+1. Create a new Gmail account, e.g. `aa.mel.surveys@gmail.com`.
+2. Turn on 2-Step Verification for **that** account
+   ([myaccount.google.com/security](https://myaccount.google.com/security)).
+3. Create an App Password for it
+   ([myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)).
+4. Set the secrets `SMTP_USERNAME` = the new address, `SMTP_PASSWORD` = the App
+   Password (16 letters, spaces don't matter), and the variables
+   `SMTP_HOST` = `smtp.gmail.com`, `SMTP_PORT` = `465`.
+5. Set `MAIL_FROM_NAME` (e.g. `Australia Assists MEL Team`) so the inbox shows a
+   name instead of the address, and `MAIL_REPLY_TO` to the address that should
+   get replies (e.g. `MEL@australiaassists.org`).
+
+Recipients see the team name as sender; when they reply, the reply goes to
+`MAIL_REPLY_TO`, not to the sending account.
 
 ### Sending from Outlook.com
 
